@@ -9,7 +9,6 @@ const {isApplied} = require('./services/isApplied');
 const { getMessage, getActionButtons } = require('./services/pagination');
 const { seedCoachExercises } = require('./services/seedDefaultExercises');
 const Config = require('./models/Config');
-const COACHES = process.env.COACHES.split(',');
 const { getConfig, isAdmin, isCoach } = require('./services/adminFuncs');
 
 const bot = new Bot(process.env.TOKEN)
