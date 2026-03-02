@@ -1,0 +1,72 @@
+const { InlineKeyboard } = require('grammy');
+
+const renderers = {
+    applications: (items, idx) => {
+    const item = items[idx];
+    return `Ім'я учня: ${item.studentName}\nПрізвище учня: ${item.studentSurname}`;
+    },
+    students: (items, idx) => {
+        const item = items[idx];
+        const gender = item.studentGender === 'male' ? '👨' : '👩';
+        const birthDate = item.studentBirthDate 
+        ? new Date(item.studentBirthDate).toLocaleDateString('uk-UA') 
+        : 'не вказано';
+
+        return (
+        `${gender} ${item.studentName} ${item.studentSurname}\n` +
+        `━━━━━━━━━━━━━━━\n` +
+        `📅 Дата народження: ${birthDate}\n`
+        );
+    },
+    trainings: (items, idx) => {
+        const training = items[idx];
+        const date = new Date(training.createdAt).toLocaleDateString('uk-UA');
+
+        const exercises = training.exercises.map(ex => {
+            const sets = ex.sets.map((s, i) =>
+            `  ${i + 1}. ${s.reps} повт. — ${s.weight > 0 ? s.weight + ' кг' : 'без ваги'}`
+            ).join('\n');
+            return `• ${ex.name}\n${sets}`;
+        }).join('\n\n');
+
+        return `📅 ${date}\n\n${exercises}`;
+    },
+};
+
+const getActionButtons = (type, idx, total) => {
+    const keyboard = new InlineKeyboard();
+    if (total > 1) {
+    keyboard
+        .text('⬅️', `page_${type}_prev_${idx}`)
+        .text('➡️', `page_${type}_next_${idx}`)
+        .row();
+    }
+    if (type === 'applications') {
+    keyboard
+        .text('✅ Прийняти', `accept_${idx}`)
+        .text('❌ Відхилити', `decline_${idx}`);
+    }
+
+    if (type === 'students'){
+    keyboard
+        .text('🗑 Видалити учня', `delete_student_${idx}`)
+        .row()
+        .text('➕ Додати тренування', `add_training_${idx}`)
+        .row()
+        .text('📋 Тренування', `view_trainings_${idx}`)
+    }
+
+    if (type === 'trainings') {
+    keyboard.text('🗑 Видалити тренування', `delete_training_${idx}`);
+    }
+
+    return keyboard;
+};
+
+const getMessage = (type, items, idx) => {
+    const render = renderers[type];
+    const total = items.length;
+    return `[${idx + 1}/${total}]\n\n${render(items, idx)}`;
+};
+
+module.exports = { getMessage, getActionButtons };
