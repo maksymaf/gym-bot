@@ -19,9 +19,12 @@ const StudentSchema = new mongoose.Schema({
         required: true,
     },
 
-    studentBirthDate: {
-        type: Date,
-        trim: true,
+    studentWeight: {
+        type: Number,
+        default: null,
+    },
+    studentHeight: {
+        type: Number,
         default: null,
     },
 

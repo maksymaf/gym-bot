@@ -28,7 +28,13 @@ const TrainingSchema = new mongoose.Schema({
             }],
             required: true
         }
-    }]
+    }],
+
+    addedBy: {
+        type: String,
+        enum: ['coach', 'student'],
+        default: 'coach',
+    }
 },
 
 {timestamps: true})

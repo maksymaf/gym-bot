@@ -22,8 +22,14 @@ async function isCoach(id) {
   return config.coachIds.includes(String(id));
 }
 
+async function isStudent(id) {
+    const student = await Student.findOne({ studentChatId: String(id) });
+    return !!student;
+}
+
 module.exports = {
     getConfig,
     isAdmin,
-    isCoach
+    isCoach,
+    isStudent,
 }

@@ -9,7 +9,7 @@ const {isApplied} = require('./services/isApplied');
 const { getMessage, getActionButtons } = require('./services/pagination');
 const { seedCoachExercises } = require('./services/seedDefaultExercises');
 const Config = require('./models/Config');
-const { getConfig, isAdmin, isCoach } = require('./services/adminFuncs');
+const { getConfig, isAdmin, isCoach, isStudent } = require('./services/adminFuncs');
 
 const bot = new Bot(process.env.TOKEN)
 
@@ -25,76 +25,96 @@ bot.command('start', async (ctx) => {
     if (await isAdmin(ctx.from.id)) {
         const keyboard = new Keyboard()
             .text('👨‍🏫 Тренери').row()
-            .text('👥 Учні').row()
+            .text('👥 Клієнти').row()
             .text('👑 Адміни').row()
-            .text('🔑 Зайти як тренер').text('📈 Зайти як учень').row()
+            .text('🔑 Зайти як тренер').text('📈 Зайти як клієнт').row()
             .resized();
         return await ctx.reply('👑 Ласкаво просимо, адміне!', { reply_markup: keyboard });
     }
 
+    const student = await Student.findOne({ studentChatId: String(ctx.from.id) });
+    if (student) {
+        const keyboard = new Keyboard()
+            .text('💪 Записати тренування').row()
+            .text('📋 Мої тренування').row()
+            .resized();
+        return ctx.reply(`Вітаю, ${student.studentName}! Оберіть дію:`, { reply_markup: keyboard });
+    }
+
     if (await isCoach(ctx.from.id)) {
-        const keyboard = new Keyboard().text('Учні').row().text('Заявки').row().text('Мої вправи');
+        const keyboard = new Keyboard().text('Клієнти').row().text('Заявки').row().text('Мої вправи');
         if (await isAdmin(ctx.from.id)) keyboard.row().text('👑 Адмін-панель');
         keyboard.resized();
         return await ctx.reply(`Вітаю у Gym Bot. Ви тренер, це ваш код ${ctx.from.id}. Оберіть наступну дію`, { reply_markup: keyboard });
     }
 
-    const roleKeyboard = new Keyboard().text('📈 Учень').row().text('👤 Гість').row().resized().oneTime();
+    const roleKeyboard = new Keyboard().text('📈 Клієнт').row().text('👤 Гість').row().resized().oneTime();
     await ctx.reply(`Вітаю у Gym Bot - оберіть свою роль та почнемо тренуватись 💪`, { reply_markup: roleKeyboard });
 });
 
 bot.command('admin', async (ctx) => {
-  if (!await isAdmin(ctx.from.id)) return;
+    if (!await isAdmin(ctx.from.id)) return;
 
     const keyboard = new Keyboard()
         .text('👨‍🏫 Тренери').row()
-        .text('👥 Учні').row()
+        .text('👥 Клієнти').row()
         .text('👑 Адміни').row()
-        .text('🔑 Зайти як тренер').text('📈 Зайти як учень').row()
+        .text('🔑 Зайти як тренер').text('📈 Зайти як клієнт').row()
         .resized();
 
-  await ctx.reply('👑 Адмін-панель', { reply_markup: keyboard });
+    await ctx.reply('👑 Адмін-панель', { reply_markup: keyboard });
 });
 
-bot.hears('👥 Учні', async (ctx) => {
-  if (!await isAdmin(ctx.from.id)) return;
+bot.hears('👥 Клієнти', async (ctx) => {
+    if (!await isAdmin(ctx.from.id)) return;
 
-  const students = await Student.find();
-  const keyboard = new InlineKeyboard();
-  students.forEach(s => {
+    const students = await Student.find();
+    const keyboard = new InlineKeyboard();
+    students.forEach(s => {
     keyboard.text(`❌ ${s.studentName} ${s.studentSurname}`, `admin_remove_student_${s._id}`).row();
-  });
+    });
 
-  const list = students.length
+    const list = students.length
     ? students.map(s => `• ${s.studentName} ${s.studentSurname} (${s.studentChatId})`).join('\n')
-    : 'Учнів поки немає';
+    : 'Клієнтів поки немає';
 
-  await ctx.reply(`👥 Учні:\n\n${list}`, { reply_markup: keyboard });
+    await ctx.reply(`👥 Клієнти:\n\n${list}`, { reply_markup: keyboard });
 });
 
 bot.hears('👨‍🏫 Тренери', async (ctx) => {
-  if (!await isAdmin(ctx.from.id)) return;
+    if (!await isAdmin(ctx.from.id)) return;
 
-  const config = await getConfig();
-  const coaches = await Coach.find({ coachChatId: { $in: config.coachIds } });
+    const config = await getConfig();
+    const coaches = await Coach.find({ coachChatId: { $in: config.coachIds } });
 
-  const keyboard = new InlineKeyboard();
-  coaches.forEach(c => {
+    const keyboard = new InlineKeyboard();
+    coaches.forEach(c => {
     keyboard.text(`❌ ${c.coachName} ${c.coachSurname}`, `admin_remove_coach_${c.coachChatId}`).row();
-  });
-  keyboard.text('➕ Додати тренера', 'admin_add_coach');
+    });
+    keyboard.text('➕ Додати тренера', 'admin_add_coach');
 
-  const list = coaches.length
+    const list = coaches.length
     ? coaches.map(c => `• ${c.coachName} ${c.coachSurname} (${c.coachChatId})`).join('\n')
     : 'Тренерів поки немає';
 
-  await ctx.reply(`👨‍🏫 Тренери:\n\n${list}`, { reply_markup: keyboard });
+    await ctx.reply(`👨‍🏫 Тренери:\n\n${list}`, { reply_markup: keyboard });
 });
 
-bot.hears('📈 Зайти як учень', async (ctx) => {
-  if (!await isAdmin(ctx.from.id)) return;
-  ctx.session.step = 'coachCode';
-  await ctx.reply('Введіть код тренера:');
+bot.hears('📈 Зайти як клієнт', async (ctx) => {
+    if (!await isAdmin(ctx.from.id)) return;
+
+    const existing = await Student.findOne({ studentChatId: String(ctx.from.id) });
+    if (existing) {
+        const keyboard = new Keyboard()
+            .text('💪 Записати тренування').row()
+            .text('📋 Мої тренування').row()
+            .text('👑 Адмін-панель').row()
+            .resized();
+        return ctx.reply(`Ви вже зареєстровані як ${existing.studentName}`, { reply_markup: keyboard });
+    }
+
+    ctx.session.step = 'coachCode';
+    await ctx.reply('Введіть код тренера:');
 });
 
 
@@ -107,7 +127,7 @@ bot.hears('🔑 Зайти як тренер', async (ctx) => {
     await config.save();
     }
 
-    const keyboard = new Keyboard().text('Учні').row().text('Заявки').row().text('Мої вправи').row().text('👑 Адмін-панель').resized();
+    const keyboard = new Keyboard().text('Клієнти').row().text('Заявки').row().text('Мої вправи').row().text('👑 Адмін-панель').resized();
     await ctx.reply('Тепер ви тренер 👨‍🏫', { reply_markup: keyboard });
 });
 
@@ -116,70 +136,70 @@ bot.hears('👑 Адмін-панель', async (ctx) => {
 
     const keyboard = new Keyboard()
         .text('👨‍🏫 Тренери').row()
-        .text('👥 Учні').row()
+        .text('👥 Клієнти').row()
         .text('👑 Адміни').row()
-        .text('🔑 Зайти як тренер').text('📈 Зайти як учень').row()
+        .text('🔑 Зайти як тренер').text('📈 Зайти як клієнт').row()
         .resized();
 
   await ctx.reply('👑 Адмін-панель', { reply_markup: keyboard });
 });
 
 bot.hears('👑 Адміни', async (ctx) => {
-  if (!await isAdmin(ctx.from.id)) return;
+    if (!await isAdmin(ctx.from.id)) return;
 
-  const config = await getConfig();
-  const keyboard = new InlineKeyboard();
-  config.admins.forEach(admin => {
+    const config = await getConfig();
+    const keyboard = new InlineKeyboard();
+    config.admins.forEach(admin => {
     keyboard.text(`❌ ${admin.name} (${admin.id})`, `admin_remove_admin_${admin.id}`).row();
-  });
-  keyboard.text('➕ Додати адміна', 'admin_add_admin');
+    });
+    keyboard.text('➕ Додати адміна', 'admin_add_admin');
 
-  const list = config.admins.length
+    const list = config.admins.length
     ? config.admins.map(a => `• ${a.name} (${a.id})`).join('\n')
     : 'Адмінів поки немає';
 
-  await ctx.reply(`👑 Адміни:\n\n${list}`, { reply_markup: keyboard });
+    await ctx.reply(`👑 Адміни:\n\n${list}`, { reply_markup: keyboard });
 });
 
 bot.callbackQuery('admin_add_admin', async (ctx) => {
-  ctx.session.step = 'adminAddAdmin';
-  await ctx.answerCallbackQuery();
-  await ctx.reply('Введіть Telegram ID нового адміна:');
+    ctx.session.step = 'adminAddAdmin';
+    await ctx.answerCallbackQuery();
+    await ctx.reply('Введіть Telegram ID нового адміна:');
 });
 
 bot.callbackQuery(/admin_remove_admin_(.+)/, async (ctx) => {
-  const adminId = ctx.match[1];
-  if (adminId === String(ctx.from.id)) {
+    const adminId = ctx.match[1];
+    if (adminId === String(ctx.from.id)) {
     return ctx.answerCallbackQuery('Не можна видалити себе!');
-  }
-  const config = await getConfig();
-  config.adminIds = config.adminIds.filter(id => id !== adminId);
-  config.admins = config.admins.filter(a => a.id !== adminId);
-  await config.save();
-  await ctx.answerCallbackQuery('Адміна видалено ✅');
-  await ctx.editMessageText('Адміна видалено');
+    }
+    const config = await getConfig();
+    config.adminIds = config.adminIds.filter(id => id !== adminId);
+    config.admins = config.admins.filter(a => a.id !== adminId);
+    await config.save();
+    await ctx.answerCallbackQuery('Адміна видалено ✅');
+    await ctx.editMessageText('Адміна видалено');
 });
 
 bot.callbackQuery('admin_add_coach', async (ctx) => {
-  ctx.session.step = 'adminAddCoach';
-  await ctx.answerCallbackQuery();
-  await ctx.reply('Введіть Telegram ID нового тренера:');
+    ctx.session.step = 'adminAddCoach';
+    await ctx.answerCallbackQuery();
+    await ctx.reply('Введіть Telegram ID нового тренера:');
 });
 
 bot.callbackQuery(/admin_remove_coach_(.+)/, async (ctx) => {
-  const coachChatId = ctx.match[1];
-  const config = await getConfig();
-  config.coachIds = config.coachIds.filter(id => id !== coachChatId);
-  await config.save();
-  await ctx.answerCallbackQuery('Тренера видалено ✅');
-  await ctx.editMessageText('Тренера видалено');
+    const coachChatId = ctx.match[1];
+    const config = await getConfig();
+    config.coachIds = config.coachIds.filter(id => id !== coachChatId);
+    await config.save();
+    await ctx.answerCallbackQuery('Тренера видалено ✅');
+    await ctx.editMessageText('Тренера видалено');
 });
 
 bot.callbackQuery(/admin_remove_student_(.+)/, async (ctx) => {
-  const studentId = ctx.match[1];
-  await Student.findByIdAndDelete(studentId);
-  await ctx.answerCallbackQuery('Учня видалено ✅');
-  await ctx.editMessageText('Учня видалено');
+    const studentId = ctx.match[1];
+    await Student.findByIdAndDelete(studentId);
+    await ctx.answerCallbackQuery('Учня видалено ✅');
+    await ctx.editMessageText('Учня видалено');
 });
 
 
@@ -187,12 +207,12 @@ bot.hears('👤 Гість', async (ctx) => {
 
 });
 
-bot.hears('Учні', async (ctx) => {
+bot.hears('Клієнти', async (ctx) => {
     if (!await isCoach(ctx.from.id)) return;
 
     const coach = await Coach.findOne({ coachChatId: ctx.from.id }).populate('coachStudents');
     if (!coach.coachStudents.length) {
-    return ctx.reply('У вас на разі немає учнів');
+    return ctx.reply('У вас на разі немає клієнтів');
     }
 
     await ctx.reply(getMessage('students', coach.coachStudents, 0), {
@@ -224,6 +244,34 @@ bot.hears('Мої вправи', async (ctx) => {
     reply_markup: keyboard,
     parse_mode: 'HTML'
     });
+});
+
+bot.hears('💪 Записати тренування', async (ctx) => {
+    const student = await Student.findOne({ studentChatId: String(ctx.from.id) });
+    if (!student) return;
+
+    ctx.session.studentTrainingExercises = [];
+    ctx.session.step = 'studentPickExercise';
+
+    await showExercisePickerForStudent(ctx, student);
+});
+
+bot.hears('📋 Мої тренування', async (ctx) => {
+    const student = await Student.findOne({ studentChatId: String(ctx.from.id) });
+    if (!student) return;
+
+    const trainings = await Training.find({ student: student._id }).sort({ createdAt: -1 });
+
+    if (!trainings.length) {
+        return ctx.reply('У вас ще немає тренувань');
+    }
+
+    await ctx.reply(getMessage('trainings', trainings, 0), {
+        reply_markup: getActionButtons('trainings', 0, trainings.length),
+        parse_mode: 'HTML'
+    });
+
+    ctx.session.currentTrainings = trainings.map(t => t.toObject());
 });
 
 bot.callbackQuery('add_exercise', async (ctx) => {
@@ -285,6 +333,19 @@ async function showExercisePicker(ctx, coach) {
     keyboard.text('✅ Завершити запис тренування', 'finish_training');
 
     await ctx.reply('Додайте вправу. Для цього оберіть категорію вправи:', { reply_markup: keyboard });
+}
+
+async function showExercisePickerForStudent(ctx, student) {
+    const coach = await Coach.findById(student.studentCoach);
+
+    const categories = [...new Set(coach.coachExercises.map(ex => ex.category))];
+    const keyboard = new InlineKeyboard();
+    categories.forEach((cat, i) => {
+        keyboard.text(cat, `spick_cat_${i}`).row();
+    });
+    keyboard.text('✅ Завершити запис тренування', 'student_finish_training');
+
+    await ctx.reply('Оберіть категорію вправи:', { reply_markup: keyboard });
 }
 
 bot.callbackQuery(/pick_cat_(\d+)/, async (ctx) => {
@@ -352,7 +413,7 @@ bot.hears('Заявки', async (ctx) => {
 
     const coach = await Coach.findOne({ coachChatId: ctx.from.id });
     if (!coach.coachApplications.length) {
-        return ctx.reply('На разі немає вхідних заявок від учнів');
+        return ctx.reply('На разі немає вхідних заявок від клієнтів');
     }
 
     await ctx.reply(getMessage('applications', coach.coachApplications, 0), {
@@ -440,14 +501,20 @@ bot.callbackQuery(/accept_(\d+)/, async (ctx) => {
     const coach = (await Coach.findOne({coachChatId: ctx.from.id}));
     const studentApplication = coach.coachApplications[studentIdx];
 
-    await bot.api.sendMessage(studentApplication.studentChatId, "✅ Вашу заявку прийнято! Тепер ви можете тренуватись 💪");
+    await bot.api.sendMessage(studentApplication.studentChatId, "✅ Вашу заявку прийнято! Тепер ви можете тренуватись 💪", {
+    reply_markup: new Keyboard()
+        .text('💪 Записати тренування').row()
+        .text('📋 Мої тренування').row()
+        .resized()
+    });
 
     coach.coachApplications.splice(studentIdx, 1);
 
     const student = new Student({
         studentName: studentApplication.studentName,
         studentSurname: studentApplication.studentSurname,
-        studentBirthDate: studentApplication.studentBirthDate,
+        studentWeight: studentApplication.studentWeight,
+        studentHeight: studentApplication.studentHeight,
         studentChatId: String(studentApplication.studentChatId),
         studentGender: studentApplication.studentGender,
         studentCoach: coach._id,
@@ -490,7 +557,7 @@ bot.callbackQuery(/delete_student_(\d+)/, async (ctx) => {
     await coach.save();
 
     if (!coach.coachStudents.length) {
-    await ctx.editMessageText('У вас більше немає учнів');
+    await ctx.editMessageText('У вас більше немає клієнтів');
     return ctx.answerCallbackQuery();
     }
 
@@ -504,8 +571,124 @@ bot.callbackQuery(/delete_student_(\d+)/, async (ctx) => {
     await ctx.answerCallbackQuery('Учня видалено ✅');
 });
 
+bot.callbackQuery(/edit_weight_(\d+)/, async (ctx) => {
+    const idx = parseInt(ctx.match[1]);
+    ctx.session.editWeightStudentIdx = idx;
+    ctx.session.step = 'editWeight';
+    await ctx.answerCallbackQuery();
+    await ctx.reply('Введіть нову вагу учня (кг):');
+});
 
-bot.hears('📈 Учень', async (ctx) => {
+bot.callbackQuery(/edit_height_(\d+)/, async (ctx) => {
+    const idx = parseInt(ctx.match[1]);
+    ctx.session.editHeightStudentIdx = idx;
+    ctx.session.step = 'editHeight';
+    await ctx.answerCallbackQuery();
+    await ctx.reply('Введіть новий ріст учня (см):');
+});
+bot.callbackQuery(/spick_cat_(\d+)/, async (ctx) => {
+    const catIdx = parseInt(ctx.match[1]);
+    const student = await Student.findOne({ studentChatId: String(ctx.from.id) });
+    const coach = await Coach.findById(student.studentCoach);
+
+    const categories = [...new Set(coach.coachExercises.map(ex => ex.category))];
+    const selectedCategory = categories[catIdx];
+    const exercises = coach.coachExercises.filter(ex => ex.category === selectedCategory);
+
+    const keyboard = new InlineKeyboard();
+    exercises.forEach((ex, i) => {
+        keyboard.text(ex.name, `spick_ex_${catIdx}_${i}`).row();
+    });
+    keyboard.text('◀️ Назад', 'sback_to_categories');
+
+    await ctx.editMessageText(`Категорія: ${selectedCategory}\n\nВиберіть вправу:`, {
+        reply_markup: keyboard,
+        parse_mode: 'HTML'
+    });
+    await ctx.answerCallbackQuery();
+});
+
+bot.callbackQuery(/spick_ex_(\d+)_(\d+)/, async (ctx) => {
+    const catIdx = parseInt(ctx.match[1]);
+    const exIdx = parseInt(ctx.match[2]);
+
+    const student = await Student.findOne({ studentChatId: String(ctx.from.id) });
+    const coach = await Coach.findById(student.studentCoach);
+
+    const categories = [...new Set(coach.coachExercises.map(ex => ex.category))];
+    const selectedCategory = categories[catIdx];
+    const exercises = coach.coachExercises.filter(ex => ex.category === selectedCategory);
+
+    ctx.session.currentExercise = {
+        name: exercises[exIdx].name,
+        category: selectedCategory,
+        sets: []
+    };
+    ctx.session.step = 'setsCount';
+
+    await ctx.answerCallbackQuery();
+    await ctx.editMessageText(`Вправа: ${ctx.session.currentExercise.name}\n\nСкільки підходів?`);
+});
+
+bot.callbackQuery('sback_to_categories', async (ctx) => {
+    const student = await Student.findOne({ studentChatId: String(ctx.from.id) });
+    await showExercisePickerForStudent(ctx, student);
+    await ctx.answerCallbackQuery();
+});
+
+bot.callbackQuery('student_finish_training', async (ctx) => {
+    if (!ctx.session.studentTrainingExercises?.length) {
+        await ctx.answerCallbackQuery('Додайте хоча б одну вправу!');
+        return;
+    }
+
+    const student = await Student.findOne({ studentChatId: String(ctx.from.id) });
+
+    const training = new Training({
+        coach: student.studentCoach,
+        student: student._id,
+        exercises: ctx.session.studentTrainingExercises,
+        addedBy: 'student'
+    });
+
+    await training.save();
+
+    ctx.session.step = null;
+    ctx.session.studentTrainingExercises = null;
+
+    await ctx.answerCallbackQuery();
+    await ctx.reply('🎉 Тренування записано!');
+});
+
+bot.hears('💪 Записати тренування', async (ctx) => {
+    const student = await Student.findOne({ studentChatId: String(ctx.from.id) });
+    if (!student) return;
+
+    ctx.session.studentTrainingExercises = [];
+    ctx.session.step = 'studentPickExercise';
+
+    await showExercisePickerForStudent(ctx, student);
+});
+
+bot.hears('📋 Мої тренування', async (ctx) => {
+    const student = await Student.findOne({ studentChatId: String(ctx.from.id) });
+    if (!student) return;
+
+    const trainings = await Training.find({ student: student._id }).sort({ createdAt: -1 });
+
+    if (!trainings.length) {
+        return ctx.reply('У вас ще немає тренувань');
+    }
+
+    await ctx.reply(getMessage('trainings', trainings, 0), {
+        reply_markup: getActionButtons('trainings', 0, trainings.length),
+        parse_mode: 'HTML'
+    });
+
+    ctx.session.currentTrainings = trainings.map(t => t.toObject());
+});
+
+bot.hears('📈 Клієнт', async (ctx) => {
     ctx.session.step = 'coachCode';
     await ctx.reply('Введіть код тренераа:');
 });
@@ -546,44 +729,52 @@ bot.on('message', async (ctx) => {
 
             case 'gender':
                 ctx.session.gender = text;
-                ctx.session.step = 'birthDate';
-                await ctx.reply('Введіть дату народження (ДД.ММ.РРРР):', {reply_markup: {remove_keyboard: true}});
+                ctx.session.step = 'weight';
+                await ctx.reply('Введіть вашу вагу (кг):', { reply_markup: { remove_keyboard: true } });
                 break;
 
-            case 'birthDate':
-                const dateRegex = /^(0[1-9]|[12][0-9]|3[01])\.(0[1-9]|1[0-2])\.(19|20)\d{2}$/;
 
-                if (!dateRegex.test(text)) {
-                    await ctx.reply('Неправильний формат дати. Введіть у форматі ДД.ММ.РРРР');
-                    return; 
+            case 'weight': {
+                const w = parseFloat(text);
+                if (isNaN(w)) {
+                    await ctx.reply('Введіть вагу числом:');
+                    return;
                 }
+                ctx.session.weight = w;
+                ctx.session.step = 'height';
+                await ctx.reply('Введіть ваш ріст (см):');
+                break;
+            }
 
-                ctx.session.birthDate = text;
+            case 'height': {
+                const h = parseFloat(text);
+                if (isNaN(h)) {
+                    await ctx.reply('Введіть ріст числом:');
+                    return;
+                }
+                ctx.session.height = h;
                 ctx.session.step = null;
 
                 await ctx.reply(
-                    `Отримав всі дані:\nКод тренера: ${ctx.session.coachCode}\nІм’я: ${ctx.session.firstName}\nПрізвище: ${ctx.session.lastName}\nСтать: ${ctx.session.gender}\nДата народження: ${ctx.session.birthDate}\n\n Очікуйте коли тренер прийме вашу заявку`
+                    `Отримав всі дані:\nКод тренера: ${ctx.session.coachCode}\nІм'я: ${ctx.session.firstName}\nПрізвище: ${ctx.session.lastName}\nСтать: ${ctx.session.gender}\nВага: ${ctx.session.weight} кг\nРіст: ${ctx.session.height} см\n\nОчікуйте коли тренер прийме вашу заявку`
                 );
 
-                const applicationGetterCoach = await Coach.findOne({coachChatId: ctx.session.coachCode});
-
+                const applicationGetterCoach = await Coach.findOne({ coachChatId: ctx.session.coachCode });
                 const studentGender = ctx.session.gender === 'Чоловік' ? 'male' : 'female';
-                const [day, month, year] = ctx.session.birthDate.split('.').map(Number);
-                const studentBirthDate = new Date(year, month - 1, day);
 
-                applicationGetterCoach.coachApplications.push(
-                    {
-                        coachChatId: ctx.session.coachCode,
-                        studentChatId: ctx.from.id,
-                        studentName: ctx.session.firstName,
-                        studentSurname: ctx.session.lastName,
-                        studentGender,
-                        studentBirthDate,
-                    }
-                );
+                applicationGetterCoach.coachApplications.push({
+                    coachChatId: ctx.session.coachCode,
+                    studentChatId: ctx.from.id,
+                    studentName: ctx.session.firstName,
+                    studentSurname: ctx.session.lastName,
+                    studentGender,
+                    studentWeight: ctx.session.weight,
+                    studentHeight: ctx.session.height,
+                });
 
                 await applicationGetterCoach.save();
                 break;
+            }
 
             case 'addExercise': {
                 const exerciseCoach = await Coach.findOne({ coachChatId: ctx.from.id });
@@ -653,19 +844,33 @@ bot.on('message', async (ctx) => {
                     ctx.session.step = 'setWeight';
                     await ctx.reply(`Підхід ${ctx.session.currentSet}/${ctx.session.totalSets}\nВведіть вагу (кг) або "без ваги":`);
                 } else {
-                    ctx.session.trainingExercises.push({ ...ctx.session.currentExercise });
-                    ctx.session.currentExercise = null;
-                    ctx.session.step = 'pickExercise';
+                    const isStudentFlow = !!ctx.session.studentTrainingExercises;
 
-                    const coach = await Coach.findOne({ coachChatId: ctx.from.id });
-                    const done = ctx.session.trainingExercises.map(ex => {
-                    const sets = ex.sets.map((s, i) => 
-                        `  ${i + 1}. ${s.reps} повт. — ${s.weight > 0 ? s.weight + ' кг' : 'без ваги'}`
-                    ).join('\n');
-                    return `• ${ex.name}\n${sets}`;
+                    if (isStudentFlow) {
+                        ctx.session.studentTrainingExercises.push({ ...ctx.session.currentExercise });
+                    } else {
+                        ctx.session.trainingExercises.push({ ...ctx.session.currentExercise });
+                    }
+
+                    ctx.session.currentExercise = null;
+                    ctx.session.step = isStudentFlow ? 'studentPickExercise' : 'pickExercise';
+
+                    const done = (isStudentFlow ? ctx.session.studentTrainingExercises : ctx.session.trainingExercises).map(ex => {
+                        const sets = ex.sets.map((s, i) =>
+                            `  ${i + 1}. ${s.reps} повт. — ${s.weight > 0 ? s.weight + ' кг' : 'без ваги'}`
+                        ).join('\n');
+                        return `• ${ex.name}\n${sets}`;
                     }).join('\n\n');
+
                     await ctx.reply(`✅ Вправу додано!\n\nЗаписано:\n${done}`, { parse_mode: 'HTML' });
-                    await showExercisePicker(ctx, coach);
+
+                    if (isStudentFlow) {
+                        const student = await Student.findOne({ studentChatId: String(ctx.from.id) });
+                        await showExercisePickerForStudent(ctx, student);
+                    } else {
+                        const coach = await Coach.findOne({ coachChatId: ctx.from.id });
+                        await showExercisePicker(ctx, coach);
+                    }
                 }
                 break;
             }
@@ -745,8 +950,39 @@ bot.on('message', async (ctx) => {
                 ctx.session.step = null;
                 break;
             }
+
+            case 'editWeight': {
+                const w = parseFloat(text);
+                if (isNaN(w)) {
+                    await ctx.reply('Введіть вагу числом:');
+                    return;
+                }
+                const coach = await Coach.findOne({ coachChatId: ctx.from.id }).populate('coachStudents');
+                const student = coach.coachStudents[ctx.session.editWeightStudentIdx];
+                await Student.findByIdAndUpdate(student._id, { studentWeight: w });
+                ctx.session.step = null;
+                ctx.session.editWeightStudentIdx = null;
+                await ctx.reply(`✅ Вагу оновлено: ${w} кг`);
+                break;
+            }
+
+            case 'editHeight': {
+                const h = parseFloat(text);
+                if (isNaN(h)) {
+                    await ctx.reply('Введіть ріст числом:');
+                    return;
+                }
+                const coach = await Coach.findOne({ coachChatId: ctx.from.id }).populate('coachStudents');
+                const student = coach.coachStudents[ctx.session.editHeightStudentIdx];
+                await Student.findByIdAndUpdate(student._id, { studentHeight: h });
+                ctx.session.step = null;
+                ctx.session.editHeightStudentIdx = null;
+                await ctx.reply(`✅ Ріст оновлено: ${h} см`);
+                break;
+            }
+
             default:
-                await ctx.reply('Натисніть "📈 Учень", щоб почати заповнення форми.');
+                await ctx.reply('Натисніть "📈 Клієнт", щоб почати заповнення форми.');
         }
     }
     
@@ -801,6 +1037,14 @@ async function main() {
         // await Coach.updateMany(
         //     { coachExercises: null },
         //     { $set: { coachExercises: [] } }
+        // );
+        // await Student.updateMany(
+        //     { studentBirthDate: { $exists: true } },
+        //     { $unset: { studentBirthDate: 1 }, $set: { studentWeight: null, studentHeight: null } }
+        // );
+        // await Training.updateMany(
+        //     { addedBy: { $exists: false } },
+        //     { $set: { addedBy: 'coach' } }
         // );
         await seedCoachExercises();
         bot.start();

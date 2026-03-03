@@ -2,20 +2,17 @@ const { InlineKeyboard } = require('grammy');
 
 const renderers = {
     applications: (items, idx) => {
-    const item = items[idx];
-    return `Ім'я учня: ${item.studentName}\nПрізвище учня: ${item.studentSurname}`;
+        const item = items[idx];
+        return `Ім'я учня: ${item.studentName}\nПрізвище учня: ${item.studentSurname}`;
     },
     students: (items, idx) => {
         const item = items[idx];
         const gender = item.studentGender === 'male' ? '👨' : '👩';
-        const birthDate = item.studentBirthDate 
-        ? new Date(item.studentBirthDate).toLocaleDateString('uk-UA') 
-        : 'не вказано';
-
         return (
-        `${gender} ${item.studentName} ${item.studentSurname}\n` +
-        `━━━━━━━━━━━━━━━\n` +
-        `📅 Дата народження: ${birthDate}\n`
+            `${gender} ${item.studentName} ${item.studentSurname}\n` +
+            `━━━━━━━━━━━━━━━\n` +
+            `⚖️ Вага: ${item.studentWeight ?? 'не вказано'} кг\n` +
+            `📏 Ріст: ${item.studentHeight ?? 'не вказано'} см\n`
         );
     },
     trainings: (items, idx) => {
@@ -49,11 +46,16 @@ const getActionButtons = (type, idx, total) => {
 
     if (type === 'students'){
     keyboard
-        .text('🗑 Видалити учня', `delete_student_${idx}`)
+        .text('🗑 Видалити клієнта', `delete_student_${idx}`)
         .row()
         .text('➕ Додати тренування', `add_training_${idx}`)
         .row()
-        .text('📋 Тренування', `view_trainings_${idx}`)
+        .text('📋 Попередні тренування', `view_trainings_${idx}`)
+        .row()
+        .text('✏️ Редагувати вагу', `edit_weight_${idx}`)
+        .row()
+        .text('✏️ Редагувати ріст', `edit_height_${idx}`)
+        .row()
     }
 
     if (type === 'trainings') {
