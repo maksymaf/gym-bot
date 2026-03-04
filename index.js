@@ -336,7 +336,21 @@ async function showExercisePicker(ctx, coach) {
 }
 
 async function showExercisePickerForStudent(ctx, student) {
+    console.log('=== showExercisePickerForStudent ===');
+    console.log('student:', JSON.stringify(student));
+    
+    if (!student) {
+        console.log('STUDENT IS NULL!');
+        return ctx.reply('❌ Студента не знайдено');
+    }
+    
+    console.log('studentCoach:', student.studentCoach);
     const coach = await Coach.findById(student.studentCoach);
+    console.log('coach:', JSON.stringify(coach?._id));
+    
+    if (!coach) {
+        return ctx.reply('❌ Тренера не знайдено');
+    }
 
     const categories = [...new Set(coach.coachExercises.map(ex => ex.category))];
     const keyboard = new InlineKeyboard();
@@ -348,7 +362,7 @@ async function showExercisePickerForStudent(ctx, student) {
     await ctx.reply('Оберіть категорію вправи:', { reply_markup: keyboard });
 }
 
-bot.callbackQuery(/pick_cat_(\d+)/, async (ctx) => {
+bot.callbackQuery(/^pick_cat_(\d+)$/, async (ctx) => {
     const catIdx = parseInt(ctx.match[1]);
     const coach = await Coach.findOne({ coachChatId: ctx.from.id });
 
@@ -371,7 +385,7 @@ bot.callbackQuery(/pick_cat_(\d+)/, async (ctx) => {
     await ctx.answerCallbackQuery();
 });
 
-bot.callbackQuery(/pick_ex_(\d+)_(\d+)/, async (ctx) => {
+bot.callbackQuery(/^pick_ex_(\d+)_(\d+)$/, async (ctx) => {
     const catIdx = parseInt(ctx.match[1]);
     const exIdx = parseInt(ctx.match[2]);
 
@@ -444,31 +458,35 @@ bot.callbackQuery(/view_trainings_(\d+)/, async (ctx) => {
     ctx.session.currentTrainings = trainings.map(t => t.toObject());
 });
 
-bot.callbackQuery(/page_(\w+)_(prev|next)_(\d+)/, async (ctx) => {
+bot.callbackQuery(/^page_(\w+)_(prev|next)_(\d+)$/, async (ctx) => {
     const type = ctx.match[1];
     const direction = ctx.match[2];
     let index = parseInt(ctx.match[3]);
 
-    const coach = await Coach.findOne({ coachChatId: ctx.from.id }).populate('coachStudents');
+    let items;
 
-    const itemsMap = {
-        applications: coach.coachApplications,
-        students: coach.coachStudents,
-        trainings: ctx.session.currentTrainings,
-    };
+    if (type === 'trainings') {
+        items = ctx.session.currentTrainings;
+    } else {
+        const coach = await Coach.findOne({ coachChatId: ctx.from.id }).populate('coachStudents');
+        if (!coach) return ctx.answerCallbackQuery();
+        items = {
+            applications: coach.coachApplications,
+            students: coach.coachStudents,
+        }[type];
+    }
 
-    const items = itemsMap[type];
     if (!items) return ctx.answerCallbackQuery();
 
     if (direction === 'next') {
-    index = index >= items.length - 1 ? 0 : index + 1;
+        index = index >= items.length - 1 ? 0 : index + 1;
     } else {
-    index = index <= 0 ? items.length - 1 : index - 1;
+        index = index <= 0 ? items.length - 1 : index - 1;
     }
 
     await ctx.editMessageText(getMessage(type, items, index), {
-    reply_markup: getActionButtons(type, index, items.length),
-    parse_mode: 'HTML'
+        reply_markup: getActionButtons(type, index, items.length),
+        parse_mode: 'HTML'
     });
 
     await ctx.answerCallbackQuery();
@@ -586,10 +604,21 @@ bot.callbackQuery(/edit_height_(\d+)/, async (ctx) => {
     await ctx.answerCallbackQuery();
     await ctx.reply('Введіть новий ріст учня (см):');
 });
-bot.callbackQuery(/spick_cat_(\d+)/, async (ctx) => {
+
+bot.callbackQuery(/^spick_cat_(\d+)$/, async (ctx) => {
+    console.log('=== spick_cat ===');
+    console.log('ctx.from.id:', ctx.from.id);
+    
     const catIdx = parseInt(ctx.match[1]);
     const student = await Student.findOne({ studentChatId: String(ctx.from.id) });
+    console.log('student:', JSON.stringify(student));
+    
+    if (!student) return ctx.answerCallbackQuery('❌ Студента не знайдено');
+
     const coach = await Coach.findById(student.studentCoach);
+    console.log('coach:', JSON.stringify(coach?._id));
+    
+    if (!coach) return ctx.answerCallbackQuery('❌ Тренера не знайдено');
 
     const categories = [...new Set(coach.coachExercises.map(ex => ex.category))];
     const selectedCategory = categories[catIdx];
@@ -605,10 +634,11 @@ bot.callbackQuery(/spick_cat_(\d+)/, async (ctx) => {
         reply_markup: keyboard,
         parse_mode: 'HTML'
     });
+    console.log('clicked');
     await ctx.answerCallbackQuery();
 });
 
-bot.callbackQuery(/spick_ex_(\d+)_(\d+)/, async (ctx) => {
+bot.callbackQuery(/^spick_ex_(\d+)_(\d+)$/, async (ctx) => {
     const catIdx = parseInt(ctx.match[1]);
     const exIdx = parseInt(ctx.match[2]);
 
@@ -658,34 +688,6 @@ bot.callbackQuery('student_finish_training', async (ctx) => {
 
     await ctx.answerCallbackQuery();
     await ctx.reply('🎉 Тренування записано!');
-});
-
-bot.hears('💪 Записати тренування', async (ctx) => {
-    const student = await Student.findOne({ studentChatId: String(ctx.from.id) });
-    if (!student) return;
-
-    ctx.session.studentTrainingExercises = [];
-    ctx.session.step = 'studentPickExercise';
-
-    await showExercisePickerForStudent(ctx, student);
-});
-
-bot.hears('📋 Мої тренування', async (ctx) => {
-    const student = await Student.findOne({ studentChatId: String(ctx.from.id) });
-    if (!student) return;
-
-    const trainings = await Training.find({ student: student._id }).sort({ createdAt: -1 });
-
-    if (!trainings.length) {
-        return ctx.reply('У вас ще немає тренувань');
-    }
-
-    await ctx.reply(getMessage('trainings', trainings, 0), {
-        reply_markup: getActionButtons('trainings', 0, trainings.length),
-        parse_mode: 'HTML'
-    });
-
-    ctx.session.currentTrainings = trainings.map(t => t.toObject());
 });
 
 bot.hears('📈 Клієнт', async (ctx) => {
