@@ -43,7 +43,11 @@ const StudentSchema = new mongoose.Schema({
     studentTrainings: [{
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Training'
-    }]
+    }],
+    studentCanSelfLog: {
+        type: Boolean,
+        default: false,
+    }
 },
 
 {timestamps: true})

@@ -21,7 +21,7 @@ const renderers = {
 
         const exercises = training.exercises.map(ex => {
             const sets = ex.sets.map((s, i) =>
-            `  ${i + 1}. ${s.reps} повт. — ${s.weight > 0 ? s.weight + ' кг' : 'без ваги'}`
+            `  ${i + 1}. ${s.weight > 0 ? s.weight + ' кг' : 'без ваги'} — ${s.reps} повт.`
             ).join('\n');
             return `• ${ex.name}\n${sets}`;
         }).join('\n\n');
@@ -30,7 +30,7 @@ const renderers = {
     },
 };
 
-const getActionButtons = (type, idx, total) => {
+const getActionButtons = (type, idx, total, options = {}) => {
     const keyboard = new InlineKeyboard();
     if (total > 1) {
     keyboard
@@ -45,17 +45,20 @@ const getActionButtons = (type, idx, total) => {
     }
 
     if (type === 'students'){
-    keyboard
-        .text('🗑 Видалити клієнта', `delete_student_${idx}`)
-        .row()
-        .text('➕ Додати тренування', `add_training_${idx}`)
-        .row()
-        .text('📋 Попередні тренування', `view_trainings_${idx}`)
-        .row()
-        .text('✏️ Редагувати вагу', `edit_weight_${idx}`)
-        .row()
-        .text('✏️ Редагувати ріст', `edit_height_${idx}`)
-        .row()
+        const selfLogLabel = options.selfLog
+            ? '📝 Самозапис: ✅ увімкнено'
+            : '📝 Самозапис: ❌ вимкнено';
+        keyboard
+            .text('🗑 Видалити клієнта', `delete_student_${idx}`)
+            .row()
+            .text('➕ Додати тренування', `add_training_${idx}`)
+            .row()
+            .text('📋 Попередні тренування', `view_trainings_${idx}`)
+            .row()
+            .text('✏️ Редагувати вагу', `edit_weight_${idx}`)
+            .row()
+            .text(selfLogLabel, `toggle_selflog_${idx}`)
+            .row()
     }
 
     if (type === 'trainings') {

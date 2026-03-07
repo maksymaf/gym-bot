@@ -170,7 +170,7 @@ bot.callbackQuery('admin_add_admin', async (ctx) => {
 bot.callbackQuery(/admin_remove_admin_(.+)/, async (ctx) => {
     const adminId = ctx.match[1];
     if (adminId === String(ctx.from.id)) {
-    return ctx.answerCallbackQuery('Не можна видалити себе!');
+        return ctx.answerCallbackQuery('Не можна видалити себе!');
     }
     const config = await getConfig();
     config.adminIds = config.adminIds.filter(id => id !== adminId);
@@ -212,11 +212,11 @@ bot.hears('Клієнти', async (ctx) => {
 
     const coach = await Coach.findOne({ coachChatId: ctx.from.id }).populate('coachStudents');
     if (!coach.coachStudents.length) {
-    return ctx.reply('У вас на разі немає клієнтів');
+        return ctx.reply('У вас на разі немає клієнтів');
     }
 
     await ctx.reply(getMessage('students', coach.coachStudents, 0), {
-    reply_markup: getActionButtons('students', 0, coach.coachStudents.length)
+        reply_markup: getActionButtons('students', 0, coach.coachStudents.length, { selfLog: coach.coachStudents[0].studentCanSelfLog })
     });
 });
 
@@ -249,6 +249,10 @@ bot.hears('Мої вправи', async (ctx) => {
 bot.hears('💪 Записати тренування', async (ctx) => {
     const student = await Student.findOne({ studentChatId: String(ctx.from.id) });
     if (!student) return;
+
+    if (!student.studentCanSelfLog) {
+        return ctx.reply('❌ Тренер ще не дав вам доступ до самостійного запису тренувань');
+    }
 
     ctx.session.studentTrainingExercises = [];
     ctx.session.step = 'studentPickExercise';
@@ -309,8 +313,8 @@ bot.callbackQuery(/add_training_(\d+)/, async (ctx) => {
     const coach = await Coach.findOne({ coachChatId: ctx.from.id });
 
     if (!coach.coachExercises.length) {
-    await ctx.answerCallbackQuery('У вас ще немає вправ!');
-    return ctx.reply('Спочатку додайте вправи в розділі "Мої вправи"');
+        await ctx.answerCallbackQuery('У вас ще немає вправ!');
+        return ctx.reply('Спочатку додайте вправи в розділі "Мої вправи"');
     }
 
     ctx.session.trainingStudentIdx = idx;
@@ -399,12 +403,12 @@ bot.callbackQuery(/^pick_ex_(\d+)_(\d+)$/, async (ctx) => {
     category: selectedCategory,
     sets: []
     };
-    ctx.session.step = 'setsCount';
-
+    ctx.session.currentSet = 1;
+    ctx.session.step = 'setWeight';
     await ctx.answerCallbackQuery();
     await ctx.editMessageText(
-    `Вправа: ${ctx.session.currentExercise.name}\n\nСкільки підходів?`,
-    { parse_mode: 'HTML' }
+        `Вправа: ${ctx.session.currentExercise.name}\n\nПідхід 1\nВведіть вагу (кг) або "без ваги":`,
+        { parse_mode: 'HTML' }
     );
 });
 
@@ -484,8 +488,9 @@ bot.callbackQuery(/^page_(\w+)_(prev|next)_(\d+)$/, async (ctx) => {
         index = index <= 0 ? items.length - 1 : index - 1;
     }
 
+    const options = type === 'students' ? { selfLog: items[index].studentCanSelfLog } : {};
     await ctx.editMessageText(getMessage(type, items, index), {
-        reply_markup: getActionButtons(type, index, items.length),
+        reply_markup: getActionButtons(type, index, items.length, options),
         parse_mode: 'HTML'
     });
 
@@ -582,8 +587,8 @@ bot.callbackQuery(/delete_student_(\d+)/, async (ctx) => {
     const newIdx = idx >= coach.coachStudents.length ? 0 : idx;
 
     await ctx.editMessageText(getMessage('students', coach.coachStudents, newIdx), {
-    reply_markup: getActionButtons('students', newIdx, coach.coachStudents.length),
-    parse_mode: 'HTML'
+        reply_markup: getActionButtons('students', newIdx, coach.coachStudents.length, { selfLog: coach.coachStudents[newIdx].studentCanSelfLog }),
+        parse_mode: 'HTML'
     });
 
     await ctx.answerCallbackQuery('Учня видалено ✅');
@@ -595,14 +600,6 @@ bot.callbackQuery(/edit_weight_(\d+)/, async (ctx) => {
     ctx.session.step = 'editWeight';
     await ctx.answerCallbackQuery();
     await ctx.reply('Введіть нову вагу учня (кг):');
-});
-
-bot.callbackQuery(/edit_height_(\d+)/, async (ctx) => {
-    const idx = parseInt(ctx.match[1]);
-    ctx.session.editHeightStudentIdx = idx;
-    ctx.session.step = 'editHeight';
-    await ctx.answerCallbackQuery();
-    await ctx.reply('Введіть новий ріст учня (см):');
 });
 
 bot.callbackQuery(/^spick_cat_(\d+)$/, async (ctx) => {
@@ -654,10 +651,74 @@ bot.callbackQuery(/^spick_ex_(\d+)_(\d+)$/, async (ctx) => {
         category: selectedCategory,
         sets: []
     };
-    ctx.session.step = 'setsCount';
+    ctx.session.currentSet = 1;
+    ctx.session.step = 'setWeight';
+    await ctx.answerCallbackQuery();
+    await ctx.editMessageText(`Вправа: ${ctx.session.currentExercise.name}\n\nПідхід 1\nВведіть вагу (кг) або "без ваги":`,
+        { parse_mode: 'HTML' }
+    );
+});
+
+bot.callbackQuery('finish_exercise', async (ctx) => {
+    if (!ctx.session.currentExercise?.sets?.length) {
+        await ctx.answerCallbackQuery('Додайте хоча б один підхід!');
+        return;
+    }
+
+    const isStudentFlow = !!ctx.session.studentTrainingExercises;
+
+    if (isStudentFlow) {
+        ctx.session.studentTrainingExercises.push({ ...ctx.session.currentExercise });
+    } else {
+        ctx.session.trainingExercises.push({ ...ctx.session.currentExercise });
+    }
+
+    const exercises = isStudentFlow
+        ? ctx.session.studentTrainingExercises
+        : ctx.session.trainingExercises;
+    const exIdx = exercises.length - 1;
+
+    const done = exercises.map(ex => {
+        const sets = ex.sets.map((s, i) =>
+            `  ${i + 1}. ${s.weight > 0 ? s.weight + ' кг' : 'без ваги'} — ${s.reps} повт.`
+        ).join('\n'); 
+        return `• ${ex.name}\n${sets}`;
+    }).join('\n\n');
+
+    const keyboard = new InlineKeyboard();
+    exercises[exIdx].sets.forEach((s, i) => {
+        keyboard.text(`✏️ Підхід ${i + 1}`, `edit_set_${exIdx}_${i}`).row()
+    });
+
+    ctx.session.currentExercise = null;
+    ctx.session.currentSet = 1;
+    ctx.session.step = isStudentFlow ? 'studentPickExercise' : 'pickExercise';
 
     await ctx.answerCallbackQuery();
-    await ctx.editMessageText(`Вправа: ${ctx.session.currentExercise.name}\n\nСкільки підходів?`);
+    await ctx.reply(`✅ Вправу завершено!\n\nЗаписано:\n${done}`, {
+        reply_markup: keyboard,
+        parse_mode: 'HTML'
+    });
+
+    if (isStudentFlow) {
+        const student = await Student.findOne({ studentChatId: String(ctx.from.id) });
+        await showExercisePickerForStudent(ctx, student);
+    } else {
+        const coach = await Coach.findOne({ coachChatId: ctx.from.id });
+        await showExercisePicker(ctx, coach);
+    }
+});
+
+bot.callbackQuery(/^edit_set_(\d+)_(\d+)$/, async (ctx) => {
+    const exIdx = parseInt(ctx.match[1]);
+    const setIdx = parseInt(ctx.match[2]);
+
+    ctx.session.editSetExIdx = exIdx;
+    ctx.session.editSetIdx = setIdx;
+    ctx.session.step = 'editSetWeight';
+
+    await ctx.answerCallbackQuery();
+    await ctx.reply(`✏️ Підхід ${setIdx + 1}\nВведіть нову вагу (кг) або "без ваги":`);
 });
 
 bot.callbackQuery('sback_to_categories', async (ctx) => {
@@ -688,6 +749,26 @@ bot.callbackQuery('student_finish_training', async (ctx) => {
 
     await ctx.answerCallbackQuery();
     await ctx.reply('🎉 Тренування записано!');
+});
+
+bot.callbackQuery(/^toggle_selflog_(\d+)$/, async (ctx) => {
+    const idx = parseInt(ctx.match[1]);
+    const coach = await Coach.findOne({ coachChatId: ctx.from.id }).populate('coachStudents');
+    const student = coach.coachStudents[idx];
+
+    student.studentCanSelfLog = !student.studentCanSelfLog;
+    await student.save();
+
+    const selfLogBtn = student.studentCanSelfLog
+        ? '📝 Самозапис: ✅ увімкнено'
+        : '📝 Самозапис: ❌ вимкнено';
+
+    await ctx.answerCallbackQuery(
+        student.studentCanSelfLog ? '✅ Самозапис увімкнено' : '❌ Самозапис вимкнено'
+    );
+
+    const keyboard = getActionButtons('students', idx, coach.coachStudents.length, { selfLog: student.studentCanSelfLog });
+    await ctx.editMessageReplyMarkup({ reply_markup: keyboard });
 });
 
 bot.hears('📈 Клієнт', async (ctx) => {
@@ -747,37 +828,6 @@ bot.on('message', async (ctx) => {
                 await ctx.reply('Введіть ваш ріст (см):');
                 break;
             }
-
-            case 'height': {
-                const h = parseFloat(text);
-                if (isNaN(h)) {
-                    await ctx.reply('Введіть ріст числом:');
-                    return;
-                }
-                ctx.session.height = h;
-                ctx.session.step = null;
-
-                await ctx.reply(
-                    `Отримав всі дані:\nКод тренера: ${ctx.session.coachCode}\nІм'я: ${ctx.session.firstName}\nПрізвище: ${ctx.session.lastName}\nСтать: ${ctx.session.gender}\nВага: ${ctx.session.weight} кг\nРіст: ${ctx.session.height} см\n\nОчікуйте коли тренер прийме вашу заявку`
-                );
-
-                const applicationGetterCoach = await Coach.findOne({ coachChatId: ctx.session.coachCode });
-                const studentGender = ctx.session.gender === 'Чоловік' ? 'male' : 'female';
-
-                applicationGetterCoach.coachApplications.push({
-                    coachChatId: ctx.session.coachCode,
-                    studentChatId: ctx.from.id,
-                    studentName: ctx.session.firstName,
-                    studentSurname: ctx.session.lastName,
-                    studentGender,
-                    studentWeight: ctx.session.weight,
-                    studentHeight: ctx.session.height,
-                });
-
-                await applicationGetterCoach.save();
-                break;
-            }
-
             case 'addExercise': {
                 const exerciseCoach = await Coach.findOne({ coachChatId: ctx.from.id });
                 exerciseCoach.coachExercises.push({
@@ -800,19 +850,6 @@ bot.on('message', async (ctx) => {
                 await ctx.reply(`Категорія: ${text}\n\nВведіть назву вправи:`, { parse_mode: 'HTML' });
                 break;
 
-            case 'setsCount': {
-                const n = parseInt(text);
-                if (isNaN(n) || n < 1) {
-                    await ctx.reply('Введіть коректну кількість підходів (число):');
-                    return;
-                }
-                ctx.session.totalSets = n;
-                ctx.session.currentSet = 1;
-                ctx.session.step = 'setWeight';
-                await ctx.reply(`Підхід ${ctx.session.currentSet}/${n}\nВведіть вагу (кг) або напишіть "без ваги":`);
-                break;
-            }
-
             case 'setWeight': {
                 if (text.toLowerCase() === 'без ваги') {
                     ctx.session.currentWeight = 0;
@@ -825,7 +862,7 @@ bot.on('message', async (ctx) => {
                     ctx.session.currentWeight = w;
                 }
                 ctx.session.step = 'setReps';
-                await ctx.reply(`Підхід ${ctx.session.currentSet}/${ctx.session.totalSets}\nКількість повторів:`);
+                await ctx.reply(`Підхід ${ctx.session.currentSet}\nКількість повторів:`);
                 break;
             }
 
@@ -841,39 +878,14 @@ bot.on('message', async (ctx) => {
                     reps
                 });
 
-                if (ctx.session.currentSet < ctx.session.totalSets) {
-                    ctx.session.currentSet++;
-                    ctx.session.step = 'setWeight';
-                    await ctx.reply(`Підхід ${ctx.session.currentSet}/${ctx.session.totalSets}\nВведіть вагу (кг) або "без ваги":`);
-                } else {
-                    const isStudentFlow = !!ctx.session.studentTrainingExercises;
+                ctx.session.currentSet++;
+                ctx.session.step = 'setWeight';
 
-                    if (isStudentFlow) {
-                        ctx.session.studentTrainingExercises.push({ ...ctx.session.currentExercise });
-                    } else {
-                        ctx.session.trainingExercises.push({ ...ctx.session.currentExercise });
-                    }
-
-                    ctx.session.currentExercise = null;
-                    ctx.session.step = isStudentFlow ? 'studentPickExercise' : 'pickExercise';
-
-                    const done = (isStudentFlow ? ctx.session.studentTrainingExercises : ctx.session.trainingExercises).map(ex => {
-                        const sets = ex.sets.map((s, i) =>
-                            `  ${i + 1}. ${s.reps} повт. — ${s.weight > 0 ? s.weight + ' кг' : 'без ваги'}`
-                        ).join('\n');
-                        return `• ${ex.name}\n${sets}`;
-                    }).join('\n\n');
-
-                    await ctx.reply(`✅ Вправу додано!\n\nЗаписано:\n${done}`, { parse_mode: 'HTML' });
-
-                    if (isStudentFlow) {
-                        const student = await Student.findOne({ studentChatId: String(ctx.from.id) });
-                        await showExercisePickerForStudent(ctx, student);
-                    } else {
-                        const coach = await Coach.findOne({ coachChatId: ctx.from.id });
-                        await showExercisePicker(ctx, coach);
-                    }
-                }
+                const finishBtn = new InlineKeyboard().text('🏁 Завершити вправу', 'finish_exercise');
+                await ctx.reply(
+                    `✅ Підхід збережено!\n\nПідхід ${ctx.session.currentSet}\nВведіть вагу (кг) або "без ваги":`,
+                    { reply_markup: finishBtn }
+                );
                 break;
             }
 
@@ -968,18 +980,64 @@ bot.on('message', async (ctx) => {
                 break;
             }
 
-            case 'editHeight': {
-                const h = parseFloat(text);
-                if (isNaN(h)) {
-                    await ctx.reply('Введіть ріст числом:');
+            case 'editSetWeight': {
+                if (text.toLowerCase() === 'без ваги') {
+                    ctx.session.editSetNewWeight = 0;
+                } else {
+                    const w = parseFloat(text);
+                    if (isNaN(w)) {
+                        await ctx.reply('Введіть вагу числом або "без ваги":');
+                        return;
+                    }
+                    ctx.session.editSetNewWeight = w;
+                }
+                ctx.session.step = 'editSetReps';
+                await ctx.reply(`Введіть нову кількість повторів:`);
+                break;
+            }
+
+            case 'editSetReps': {
+                const reps = parseInt(text);
+                if (isNaN(reps) || reps < 1) {
+                    await ctx.reply('Введіть коректну кількість повторів:');
                     return;
                 }
-                const coach = await Coach.findOne({ coachChatId: ctx.from.id }).populate('coachStudents');
-                const student = coach.coachStudents[ctx.session.editHeightStudentIdx];
-                await Student.findByIdAndUpdate(student._id, { studentHeight: h });
-                ctx.session.step = null;
-                ctx.session.editHeightStudentIdx = null;
-                await ctx.reply(`✅ Ріст оновлено: ${h} см`);
+
+                const isStudentFlow = !!ctx.session.studentTrainingExercises;
+                const exercises = isStudentFlow
+                    ? ctx.session.studentTrainingExercises
+                    : ctx.session.trainingExercises;
+
+                const exIdx = ctx.session.editSetExIdx;
+                const setIdx = ctx.session.editSetIdx;
+
+                exercises[exIdx].sets[setIdx] = {
+                    weight: ctx.session.editSetNewWeight,
+                    reps
+                };
+
+                ctx.session.step = isStudentFlow ? 'studentPickExercise' : 'pickExercise';
+                ctx.session.editSetExIdx = null;
+                ctx.session.editSetIdx = null;
+                ctx.session.editSetNewWeight = null;
+
+                // показуємо оновлений підсумок
+                const done = exercises.map(ex => {
+                    const sets = ex.sets.map((s, i) =>
+                        `  ${i + 1}. ${s.reps} повт. — ${s.weight > 0 ? s.weight + ' кг' : 'без ваги'}`
+                    ).join('\n');
+                    return `• ${ex.name}\n${sets}`;
+                }).join('\n\n');
+
+                await ctx.reply(`✅ Підхід оновлено!\n\nЗаписано:\n${done}`, { parse_mode: 'HTML' });
+                if (isStudentFlow) {
+                    const student = await Student.findOne({ studentChatId: String(ctx.from.id) });
+                    await showExercisePickerForStudent(ctx, student);
+                } else {
+                    const coach = await Coach.findOne({ coachChatId: ctx.from.id });
+                    await showExercisePicker(ctx, coach);
+                }
+
                 break;
             }
 
@@ -1048,6 +1106,10 @@ async function main() {
         //     { addedBy: { $exists: false } },
         //     { $set: { addedBy: 'coach' } }
         // );
+        await Student.updateMany(
+            { studentCanSelfLog: { $exists: false } },
+            { $set: { studentCanSelfLog: false } }
+        );
         await seedCoachExercises();
         bot.start();
     }catch(error){
