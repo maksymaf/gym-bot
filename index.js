@@ -225,24 +225,28 @@ bot.hears('Мої вправи', async (ctx) => {
 
     const coach = await Coach.findOne({ coachChatId: ctx.from.id });
 
-    const keyboard = new InlineKeyboard().text('➕ Додати вправу', 'add_exercise');
+    const keyboard = new InlineKeyboard().text('➕ Додати вправу', 'add_exercise').row();
 
     if (!coach.coachExercises.length) {
-    return ctx.reply('У вас ще немає вправ', { reply_markup: keyboard });
+        return ctx.reply('У вас ще немає вправ', { reply_markup: keyboard });
     }
 
     const categories = [...new Set(coach.coachExercises.map(ex => ex.category))];
     const list = categories.map(cat => {
-    const exs = coach.coachExercises
-        .filter(ex => ex.category === cat)
-        .map(ex => `  • ${ex.name}`)
-        .join('\n');
-    return `${cat}\n${exs}`;
+        const exs = coach.coachExercises
+            .filter(ex => ex.category === cat)
+            .map(ex => `  • ${ex.name}`)
+            .join('\n');
+        return `${cat}\n${exs}`;
     }).join('\n\n');
 
+    categories.forEach((cat, catIdx) => {
+        keyboard.text(`🗑 ${cat}`, `del_ex_cat_${catIdx}`).row();
+    });
+
     await ctx.reply(`📋 Ваші вправи:\n\n${list}`, {
-    reply_markup: keyboard,
-    parse_mode: 'HTML'
+        reply_markup: keyboard,
+        parse_mode: 'HTML'
     });
 });
 
@@ -276,6 +280,44 @@ bot.hears('📋 Мої тренування', async (ctx) => {
     });
 
     ctx.session.currentTrainings = trainings.map(t => t.toObject());
+});
+
+bot.callbackQuery(/^del_ex_cat_(\d+)$/, async (ctx) => {
+    const catIdx = parseInt(ctx.match[1]);
+    const coach = await Coach.findOne({ coachChatId: ctx.from.id });
+    const categories = [...new Set(coach.coachExercises.map(ex => ex.category))];
+    const selectedCategory = categories[catIdx];
+
+    const exercises = coach.coachExercises
+        .map((ex, i) => ({ ...ex.toObject(), globalIdx: i }))
+        .filter(ex => ex.category === selectedCategory);
+
+    const keyboard = new InlineKeyboard();
+    exercises.forEach(ex => {
+        keyboard.text(`❌ ${ex.name}`, `del_ex_${ex.globalIdx}`).row();
+    });
+    keyboard.text('◀️ Скасувати', 'cancel_del_ex');
+
+    await ctx.answerCallbackQuery();
+    await ctx.reply(`Виберіть вправу для видалення з категорії "${selectedCategory}":`, { reply_markup: keyboard });
+});
+
+bot.callbackQuery(/^del_ex_(\d+)$/, async (ctx) => {
+    const globalIdx = parseInt(ctx.match[1]);
+    const coach = await Coach.findOne({ coachChatId: ctx.from.id });
+    const removed = coach.coachExercises[globalIdx];
+    if (!removed) return ctx.answerCallbackQuery('Вправу не знайдено');
+
+    coach.coachExercises.splice(globalIdx, 1);
+    await coach.save();
+
+    await ctx.answerCallbackQuery(`✅ "${removed.name}" видалено`);
+    await ctx.editMessageText(`✅ Вправу "${removed.name}" видалено зі списку`);
+});
+
+bot.callbackQuery('cancel_del_ex', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await ctx.editMessageText('Скасовано');
 });
 
 bot.callbackQuery('add_exercise', async (ctx) => {
